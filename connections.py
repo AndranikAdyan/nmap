@@ -1,6 +1,6 @@
 import socket
 import utils
-from scapy.all import IP, TCP, sr1, send, conf # type: ignore
+from scapy.all import IP, TCP, sr, send, conf # type: ignore
 
 def check_tcp_connection(host: str, ports: list[int]) -> tuple[int, list[str]]:
 	open_ports = 0
@@ -40,22 +40,21 @@ def check_syn_connection(host: str, ports: list[int]) -> tuple[int, list[str]]:
 	try:
 		conf.verb = 0
 		open_ports = 0
-		ip_layer = IP(dst=host)
-		for port in ports:
-			tcp_syn = TCP(dport=port, flags='S')
-			syn_packet = ip_layer / tcp_syn
-
-			response = sr1(syn_packet, timeout=0.5)
-			if response and response[TCP].flags == "SA" and response.haslayer(TCP):
+		results = []
+		responses, _ = sr(IP(dst=host) / TCP(dport=ports, flags='S'), timeout=0.5)
+		for respone in responses:
+			if respone[1].haslayer(TCP) and respone[1][TCP].flags == "SA":
+				service = utils.get_service(respone[0][TCP].dport, "tcp")
+				results.append((respone[0][TCP].dport, "open", service))
 				open_ports += 1
-				service = utils.get_service(port, "tcp")
-				print(f"{port}/tcp\topen\t{service}")
-				tcp_rst = TCP(dport=port, sport=response[TCP].sport, flags="R")
-				rst_packet = ip_layer / tcp_rst
-				send(rst_packet)
 			elif len(ports) <= 11:
-				service = utils.get_service(port, "tcp")
-				print(f"{port}/tcp\tclose\t{service}")
+				service = utils.get_service(respone[0][TCP].dport, "tcp")
+				results.append((respone[0][TCP].dport, "close", service))
+
+		results.sort(key=lambda x: x[0])
+		for port, status, service in results:
+			print(f"{port}/tcp\t{status}\t{service}")
+
 		return open_ports
 	except PermissionError:
 		print("\nOperation not permitted. Please run as root or with appropriate permissions.")
